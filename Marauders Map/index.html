@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marauder's Map Network Admin Dashboard</title>
+    <meta
+      name="description"
+      content="Security-focused Hogwarts operations dashboard with live telemetry, map layers, and incident controls."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #07111f;
+        --panel: rgba(11, 20, 36, 0.82);
+        --text: #eff6ff;
+        --muted: rgba(212, 227, 255, 0.7);
+        --line: rgba(156, 185, 224, 0.18);
+        --shadow: 0 25px 80px rgba(0, 0, 0, 0.42);
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { min-height: 100%; }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 10% 20%, rgba(59, 130, 246, 0.22), transparent 25%),
+          radial-gradient(circle at 90% 10%, rgba(16, 185, 129, 0.18), transparent 28%),
+          radial-gradient(circle at 60% 90%, rgba(250, 204, 21, 0.12), transparent 32%),
+          linear-gradient(145deg, #050b15 0%, #08101d 44%, #111d32 100%);
+        font-family: Georgia, 'Times New Roman', serif;
+      }
+
+      button, input { font: inherit; }
+      button { cursor: pointer; }
+
+      .app-shell {
+        position: relative;
+        isolation: isolate;
+        width: min(1580px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 20px 0 28px;
+      }
+
+      .ambient {
+        position: fixed;
+        width: 34vw;
+        height: 34vw;
+        filter: blur(40px);
+        opacity: 0.32;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: -1;
+        animation: drift 18s ease-in-out infinite alternate;
+      }
+
+      .ambient-left { top: -9vw; left: -10vw; background: rgba(56, 189, 248, 0.25); }
+      .ambient-right { right: -12vw; top: 18vh; background: rgba(16, 185, 129, 0.24); animation-delay: -8s; }
+
+      .panel {
+        background: linear-gradient(180deg, rgba(16, 24, 40, 0.84), rgba(8, 13, 24, 0.96));
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .topbar {
+        border-radius: var(--radius-xl);
+        padding: 24px 28px;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: flex-start;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.28em;
+        font-size: 0.72rem;
+        color: #7dd3fc;
+      }
+
+      h1, h2, p { margin: 0; }
+      h1 { font-size: clamp(2rem, 3vw, 3.35rem); line-height: 0.98; max-width: 12ch; }
+
+      .lede {
+        margin-top: 12px;
+        max-width: 64ch;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.6;
+      }
+
+      .topbar-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+      .button {
+        border: 0;
+        padding: 12px 16px;
+        border-radius: 999px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        transition: transform 0.18s ease, filter 0.18s ease, background 0.18s ease;
+      }
+
+      .button:hover { transform: translateY(-1px); }
+      .button-primary { background: linear-gradient(135deg, #34d399, #38bdf8); color: #04111a; }
+      .button-secondary { background: rgba(148, 163, 184, 0.14); color: var(--text); border: 1px solid rgba(148, 163, 184, 0.18); }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin: 14px 0;
+      }
+
+      .stat-card {
+        border-radius: var(--radius-lg);
+        padding: 18px 20px;
+        min-height: 118px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .stat-card strong { font-size: clamp(1.5rem, 2vw, 2.2rem); }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 7px 11px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        border: 1px solid transparent;
+      }
+
+      .tone-online { color: #bbf7d0; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.22); }
+      .tone-scan { color: #bae6fd; background: rgba(14, 165, 233, 0.12); border-color: rgba(14, 165, 233, 0.22); }
+      .tone-alert { color: #fecdd3; background: rgba(244, 63, 94, 0.12); border-color: rgba(244, 63, 94, 0.22); }
+      .tone-lock { color: #fde68a; background: rgba(234, 179, 8, 0.12); border-color: rgba(234, 179, 8, 0.22); }
+
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: 338px minmax(0, 1fr) 392px;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .sidebar, .detail-panel, .map-panel, .footer { border-radius: var(--radius-xl); }
+      .sidebar, .detail-panel { padding: 18px; }
+      .sidebar { position: sticky; top: 16px; }
+      .sidebar-section + .sidebar-section { margin-top: 18px; }
+
+      .field-label, .section-heading span, .metric-label, .camera-state, .muted, .profile-path, .log-entry p, .directory-item p, .directory-item small, .camera-readout, .footer, .node-meta, .floor-subtitle { color: var(--muted); }
+
+      .search-input {
+        width: 100%;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        background: rgba(5, 10, 18, 0.72);
+        color: var(--text);
+        border-radius: 16px;
+        padding: 13px 14px;
+        margin-top: 8px;
+        outline: none;
+      }
+
+      .search-input:focus { border-color: rgba(125, 211, 252, 0.52); box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.08); }
+
+      .section-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 10px;
+      }
+
+      .section-heading h2 { font-size: 1rem; }
+
+      .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .chip {
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 8px 12px;
+        transition: transform 0.18s ease, background 0.18s ease;
+      }
+      .chip-active { background: rgba(125, 211, 252, 0.15); border-color: rgba(125, 211, 252, 0.28); }
+      .chip:hover { transform: translateY(-1px); }
+
+      .directory-list, .log-list { display: grid; gap: 10px; }
+      .directory-list { max-height: 560px; overflow: auto; padding-right: 4px; }
+      .directory-item, .log-entry {
+        border-radius: 18px;
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        background: rgba(255, 255, 255, 0.03);
+        padding: 12px;
+        text-align: left;
+        color: var(--text);
+      }
+      .directory-item { display: grid; gap: 8px; }
+      .directory-item-active { border-color: rgba(125, 211, 252, 0.36); background: rgba(125, 211, 252, 0.08); }
+      .directory-item-top, .directory-item-meta, .log-top, .profile-head, .camera-header, .camera-readout, .map-heading, .camera-state {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .directory-item-meta, .profile-grid, .camera-readout { flex-wrap: wrap; }
+      .directory-item-meta { font-size: 0.82rem; }
+
+      .map-panel { padding: 18px; }
+      .map-heading { margin-bottom: 14px; }
+      .camera-state { font-size: 0.84rem; }
+      .pulse {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: #34d399;
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+        animation: pulse 1.8s ease-in-out infinite;
+      }
+      .map-frame {
+        border-radius: 24px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top, rgba(125, 211, 252, 0.08), transparent 34%),
+          linear-gradient(180deg, rgba(6, 10, 19, 0.96), rgba(7, 12, 21, 0.98));
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        min-height: 860px;
+      }
+      .blueprint { width: 100%; height: 100%; min-height: 860px; display: block; }
+      .floor-shell { fill: rgba(11, 19, 32, 0.28); stroke-width: 2; }
+      .floor-inner { fill: rgba(4, 10, 18, 0.88); stroke: rgba(148, 163, 184, 0.14); }
+      .floor-label { fill: var(--text); font-size: 24px; font-weight: 700; letter-spacing: 0.03em; }
+      .floor-subtitle { font-size: 12px; }
+      .corridor { stroke: rgba(125, 211, 252, 0.24); stroke-width: 8; fill: none; stroke-linecap: round; opacity: 0.9; }
+      .corridor-dashed { stroke-dasharray: 16 18; }
+      .corridor-vertical { stroke-width: 6; }
+      .secret-passage { fill: none; stroke: rgba(251, 191, 36, 0.75); stroke-width: 4; stroke-dasharray: 10 12; opacity: 0.74; }
+      .map-endpoint { cursor: pointer; }
+      .footprint { fill: rgba(255, 255, 255, 0.8); }
+      .node { stroke-width: 2; fill: rgba(8, 15, 28, 0.96); }
+      .node-core { fill: #eff6ff; }
+      .node-label { fill: var(--text); font-size: 12px; font-weight: 700; }
+      .node-meta { font-size: 10px; }
+      .focus-ring { fill: transparent; stroke: rgba(125, 211, 252, 0.95); stroke-width: 2; }
+
+      .profile-card { display: grid; gap: 14px; }
+      .profile-head { align-items: flex-start; }
+      .profile-name { font-size: 1.32rem; font-weight: 700; }
+      .profile-path { margin-top: 3px; font-size: 0.92rem; line-height: 1.4; }
+      .profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .profile-grid > div, .camera-body, .incident-actions {
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 18px;
+      }
+      .profile-grid > div { padding: 12px; display: grid; gap: 5px; }
+      .metric-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.16em; }
+      .camera-feed { display: grid; gap: 10px; }
+      .camera-header { font-size: 0.9rem; }
+      .camera-pip { width: 10px; height: 10px; border-radius: 50%; background: #34d399; box-shadow: 0 0 16px rgba(52, 211, 153, 0.5); }
+      .camera-body { position: relative; overflow: hidden; min-height: 140px; padding: 16px; display: grid; align-content: space-between; }
+      .scanline { position: absolute; inset: 18% 0 auto; height: 2px; background: linear-gradient(90deg, transparent, rgba(125, 211, 252, 0.92), transparent); animation: sweep 2.8s linear infinite; }
+      .camera-caption { font-size: 0.98rem; font-weight: 700; max-width: 22ch; }
+      .incident-actions { display: grid; gap: 10px; padding: 12px; }
+      .log-entry { display: grid; gap: 8px; }
+      .log-top { align-items: flex-start; }
+
+      .footer {
+        margin-top: 14px;
+        padding: 14px 18px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: space-between;
+        border-radius: var(--radius-lg);
+      }
+
+      @keyframes sweep { from { transform: translateX(-20%); } to { transform: translateX(120%); } }
+      @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.56); } 70% { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); } }
+      @keyframes drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(30px, 24px, 0) scale(1.08); } }
+
+      @media (max-width: 1280px) {
+        .dashboard-grid { grid-template-columns: 320px minmax(0, 1fr); }
+        .detail-panel { grid-column: 1 / -1; }
+      }
+
+      @media (max-width: 920px) {
+        .app-shell { width: min(100vw - 18px, 100%); padding-top: 10px; }
+        .topbar, .dashboard-grid, .stats-grid { grid-template-columns: 1fr; display: grid; }
+        .sidebar { position: static; }
+        .map-frame, .blueprint { min-height: 660px; }
+        .profile-grid { grid-template-columns: 1fr; }
+        .footer { flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="ambient ambient-left"></div>
+      <div class="ambient ambient-right"></div>
+
+      <header class="topbar panel">
+        <div>
+          <p class="eyebrow">Marauder's Map Network Admin Dashboard</p>
+          <h1>Hogwarts perimeter telemetry and corridor control.</h1>
+          <p class="lede">Live endpoint monitoring, footprint tracing, and incident response for every mapped floor, corridor, and hidden passage.</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="button button-primary" id="lockdownBtn" type="button">Trigger lockdown</button>
+          <button class="button button-secondary" id="resetBtn" type="button">Mischief Managed reset</button>
+        </div>
+      </header>
+
+      <section class="stats-grid" id="statsGrid"></section>
+
+      <main class="dashboard-grid">
+        <aside class="sidebar panel">
+          <div class="sidebar-section">
+            <label class="field-label" for="endpoint-search">Search endpoints</label>
+            <input id="endpoint-search" class="search-input" placeholder="Albus Dumbledore, Gryffindor, library..." type="search" />
+          </div>
+
+          <div class="sidebar-section">
+            <div class="section-heading">
+              <h2>House filters</h2>
+              <span id="houseCount"></span>
+            </div>
+            <div class="chip-row" id="houseFilters"></div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="section-heading">
+              <h2>Tier filters</h2>
+              <span id="tierCount"></span>
+            </div>
+            <div class="chip-row" id="tierFilters"></div>
+          </div>
+
+          <div class="sidebar-section list-section">
+            <div class="section-heading">
+              <h2>Active endpoints</h2>
+              <span id="visibleCount"></span>
+            </div>
+            <div class="directory-list" id="directoryList"></div>
+          </div>
+        </aside>
+
+        <section class="map-panel panel">
+          <div class="section-heading map-heading">
+            <div>
+              <h2>Castle blueprint telemetry</h2>
+              <span id="cameraMode"></span>
+            </div>
+            <div class="camera-state">
+              <span class="status-pill tone-online" id="livePill">Live tracking</span>
+              <span class="pulse"></span>
+              <span id="tickLabel">Tick 0</span>
+            </div>
+          </div>
+
+          <div class="map-frame">
+            <svg class="blueprint" id="blueprint" viewBox="0 0 1600 2200" role="img" aria-label="Multi-level Hogwarts network map">
+              <defs>
+                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="4" result="blur"></feGaussianBlur>
+                  <feMerge>
+                    <feMergeNode in="blur"></feMergeNode>
+                    <feMergeNode in="SourceGraphic"></feMergeNode>
+                  </feMerge>
+                </filter>
+                <linearGradient id="corridor" x1="0" x2="1" y1="0" y2="0">
+                  <stop offset="0%" stop-color="rgba(125, 211, 252, 0.08)"></stop>
+                  <stop offset="100%" stop-color="rgba(255, 255, 255, 0.28)"></stop>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+        </section>
+
+        <aside class="detail-panel panel">
+          <section class="sidebar-section profile-card">
+            <div class="section-heading">
+              <h2>Telemetry profile</h2>
+              <span id="profileStatus"></span>
+            </div>
+            <div id="profilePanel"></div>
+          </section>
+
+          <section class="sidebar-section">
+            <div class="section-heading">
+              <h2>Incident response center</h2>
+              <span id="incidentState"></span>
+            </div>
+            <div class="incident-actions">
+              <button class="button button-secondary" id="corridorLockBtn" type="button">Corridor lockdown</button>
+              <button class="button button-secondary" id="mischiefBtn" type="button">Mischief Managed</button>
+            </div>
+            <p class="muted">The response center stores live movement events, access changes, and emergency directives for post-incident review.</p>
+          </section>
+
+          <section class="sidebar-section list-section">
+            <div class="section-heading">
+              <h2>Historical movement logs</h2>
+              <span id="logCount"></span>
+            </div>
+            <div class="log-list" id="logList"></div>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="footer panel">
+        <span id="layerCount"></span>
+        <span id="filterSummary"></span>
+        <span>Update cadence: real-time simulated feed</span>
+      </footer>
+    </div>
+
+    <script>
+      const floorBlueprints = [
+        { id: 'dungeons', name: 'Lower Dungeons', x: 90, y: 120, width: 1420, height: 380, accent: '#7dd3fc' },
+        { id: 'great-hall', name: 'Great Hall + Atrium', x: 90, y: 620, width: 1420, height: 380, accent: '#fbbf24' },
+        { id: 'library', name: 'Library + West Wing', x: 90, y: 1120, width: 1420, height: 380, accent: '#a78bfa' },
+        { id: 'tower', name: 'Tower Complex + Secrets', x: 90, y: 1620, width: 1420, height: 380, accent: '#34d399' },
+      ];
+
+      const floorLabels = {
+        dungeons: 'Lower Dungeons',
+        'great-hall': 'Great Hall + Atrium',
+        library: 'Library + West Wing',
+        tower: 'Tower Complex + Secrets',
+      };
+
+      const floorBounds = {
+        dungeons: { minX: 130, maxX: 1460, minY: 150, maxY: 470 },
+        'great-hall': { minX: 130, maxX: 1460, minY: 650, maxY: 970 },
+        library: { minX: 130, maxX: 1460, minY: 1150, maxY: 1470 },
+        tower: { minX: 130, maxX: 1460, minY: 1650, maxY: 1970 },
+      };
+
+      const endpointSeeds = [
+        { id: 'albus-dumbledore', name: 'Albus Dumbledore', house: 'Ravenclaw', tier: 'Leadership', department: 'Headmaster Core', floor: 'tower', x: 1090, y: 1750, path: 'Astronomy Stair / Headmaster Antechamber' },
+        { id: 'minerva-mcgonagall', name: 'Minerva McGonagall', house: 'Gryffindor', tier: 'Staff', department: 'Transfiguration', floor: 'great-hall', x: 390, y: 850, path: 'Great Hall / North Stair' },
+        { id: 'severus-snape', name: 'Severus Snape', house: 'Slytherin', tier: 'Staff', department: 'Potions & Ward Control', floor: 'dungeons', x: 1180, y: 300, path: 'Potions Corridor / Restricted Archive' },
+        { id: 'rubeus-hagrid', name: 'Rubeus Hagrid', house: 'Gryffindor', tier: 'Security', department: 'Perimeter Oversight', floor: 'great-hall', x: 960, y: 950, path: 'North Hall / Grounds Gate' },
+        { id: 'hermione-granger', name: 'Hermione Granger', house: 'Gryffindor', tier: 'Student', department: 'Library Access', floor: 'library', x: 330, y: 1290, path: 'West Wing / Restricted Stacks' },
+        { id: 'harry-potter', name: 'Harry Potter', house: 'Gryffindor', tier: 'Student', department: 'Defense Routing', floor: 'great-hall', x: 640, y: 720, path: 'Central Stair / Defense Passage' },
+        { id: 'draco-malfoy', name: 'Draco Malfoy', house: 'Slytherin', tier: 'Student', department: 'Pureblood Registry', floor: 'dungeons', x: 590, y: 420, path: 'Cellar Run / Green Tunnel' },
+        { id: 'luna-lovegood', name: 'Luna Lovegood', house: 'Ravenclaw', tier: 'Student', department: 'Observation Deck', floor: 'tower', x: 520, y: 1880, path: 'North Tower / Secret Sweep' },
+        { id: 'pomona-sprout', name: 'Pomona Sprout', house: 'Hufflepuff', tier: 'Staff', department: 'Herbology', floor: 'library', x: 1040, y: 1450, path: 'Greenhouse Link / Herb Vault' },
+        { id: 'filch', name: 'Argus Filch', house: 'Slytherin', tier: 'Security', department: 'Corridor Patrol', floor: 'dungeons', x: 270, y: 180, path: 'Caretaker Route / East Passage' },
+        { id: 'molly-weasley', name: 'Molly Weasley', house: 'Gryffindor', tier: 'Staff', department: 'Wards & Welfare', floor: 'great-hall', x: 1180, y: 760, path: 'Kitchen Conduit / Central Hall' },
+        { id: 'filius-flitwick', name: 'Filius Flitwick', house: 'Ravenclaw', tier: 'Staff', department: 'Charms', floor: 'tower', x: 1310, y: 1690, path: 'Choir Landing / Secret Arch' },
+      ];
+
+      const state = {
+        tracks: endpointSeeds.map((seed, index) => ({
+          ...seed,
+          signal: 72 + (index % 5) * 4,
+          status: index % 7 === 0 ? 'Scanning' : 'Online',
+          vx: (index % 2 === 0 ? 1 : -1) * (1.2 + (index % 3) * 0.25),
+          vy: ((index % 3) - 1) * 0.75,
+          trail: [{ x: seed.x - 10, y: seed.y + 4, age: 0 }, { x: seed.x - 24, y: seed.y + 8, age: 1 }],
+        })),
+        logs: initialLogs(),
+        search: '',
+        houseFilters: ['Gryffindor', 'Hufflepuff', 'Ravenclaw', 'Slytherin'],
+        tierFilters: ['Student', 'Staff', 'Leadership', 'Security'],
+        selectedId: endpointSeeds[0].id,
+        lockdown: false,
+        tick: 0,
+      };
+
+      const refs = {
+        statsGrid: document.getElementById('statsGrid'),
+        houseFilters: document.getElementById('houseFilters'),
+        tierFilters: document.getElementById('tierFilters'),
+        directoryList: document.getElementById('directoryList'),
+        profilePanel: document.getElementById('profilePanel'),
+        logList: document.getElementById('logList'),
+        blueprint: document.getElementById('blueprint'),
+        houseCount: document.getElementById('houseCount'),
+        tierCount: document.getElementById('tierCount'),
+        visibleCount: document.getElementById('visibleCount'),
+        profileStatus: document.getElementById('profileStatus'),
+        incidentState: document.getElementById('incidentState'),
+        logCount: document.getElementById('logCount'),
+        layerCount: document.getElementById('layerCount'),
+        filterSummary: document.getElementById('filterSummary'),
+        cameraMode: document.getElementById('cameraMode'),
+        livePill: document.getElementById('livePill'),
+        tickLabel: document.getElementById('tickLabel'),
+      };
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function metricTone(status) {
+        if (status === 'Online') return 'tone-online';
+        if (status === 'Scanning') return 'tone-scan';
+        if (status === 'Locked') return 'tone-lock';
+        return 'tone-alert';
+      }
+
+      function categoryTone(category) {
+        if (category === 'lockdown') return 'tone-lock';
+        if (category === 'alert') return 'tone-alert';
+        if (category === 'reset') return 'tone-online';
+        return 'tone-scan';
+      }
+
+      function initialLogs() {
+        const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        return [
+          { id: 'log-1', stamp, category: 'movement', message: 'Ward pulse synchronized with the main stair network.' },
+          { id: 'log-2', stamp, category: 'access', message: 'Library access lanes opened for authorized staff and advanced students.' },
+          { id: 'log-3', stamp, category: 'movement', message: 'Footprint telemetry verified across the east corridor loop.' },
+        ];
+      }
+
+      function randomStatus(track) {
+        if (state.lockdown) return track.tier === 'Leadership' ? 'Alert' : 'Locked';
+        if (track.signal > 84) return 'Online';
+        if (track.signal > 68) return 'Scanning';
+        return 'Alert';
+      }
+
+      function advanceTrack(track) {
+        const bounds = floorBounds[track.floor] || { minX: 130, maxX: 1460, minY: 150, maxY: 1970 };
+        const scale = state.lockdown ? 0.35 : 1;
+        const nextX = clamp(track.x + track.vx * scale + (Math.random() - 0.5) * scale * 1.2, bounds.minX, bounds.maxX);
+        const nextY = clamp(track.y + track.vy * scale + (Math.random() - 0.5) * scale * 0.9, bounds.minY, bounds.maxY);
+        const nextSignal = clamp(track.signal + (Math.random() - 0.5) * (state.lockdown ? 2.5 : 4.8), 26, 99);
+
+        return {
+          ...track,
+          x: nextX,
+          y: nextY,
+          signal: nextSignal,
+          vx: nextX === bounds.minX || nextX === bounds.maxX ? -track.vx : track.vx,
+          vy: nextY === bounds.minY || nextY === bounds.maxY ? -track.vy : track.vy,
+          status: randomStatus({ ...track, signal: nextSignal }),
+          trail: [{ x: nextX, y: nextY, age: 0 }, ...track.trail.map((point) => ({ ...point, age: point.age + 1 })).slice(0, 5)],
+        };
+      }
+
+      function getVisibleTracks() {
+        const query = state.search.trim().toLowerCase();
+        return state.tracks.filter((track) => {
+          const houseMatch = state.houseFilters.includes(track.house);
+          const tierMatch = state.tierFilters.includes(track.tier);
+          const searchMatch = !query || [track.name, track.department, track.floor, track.path, track.house, track.tier, track.status].join(' ').toLowerCase().includes(query);
+          return houseMatch && tierMatch && searchMatch;
+        });
+      }
+
+      function getSelectedTrack() {
+        return state.tracks.find((track) => track.id === state.selectedId) || state.tracks[0];
+      }
+
+      function toggleValue(list, value) {
+        return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+      }
+
+      function renderStats() {
+        const visible = getVisibleTracks();
+        const alerts = state.logs.filter((entry) => entry.category === 'alert' || entry.category === 'lockdown').length;
+        const stats = [
+          { label: 'Active endpoints', value: String(state.tracks.length), tone: 'tone-online' },
+          { label: 'Visible results', value: String(visible.length), tone: 'tone-scan' },
+          { label: 'Alerts tracked', value: String(alerts), tone: 'tone-alert' },
+          { label: 'System mode', value: state.lockdown ? 'LOCKDOWN' : 'LIVE', tone: state.lockdown ? 'tone-lock' : 'tone-online' },
+        ];
+
+        refs.statsGrid.innerHTML = stats.map((stat) => `
+          <article class="stat-card panel">
+            <span class="status-pill ${stat.tone}">${stat.label}</span>
+            <strong>${stat.value}</strong>
+          </article>
+        `).join('');
+      }
+
+      function renderFilters() {
+        refs.houseCount.textContent = `${state.houseFilters.length} active`;
+        refs.tierCount.textContent = `${state.tierFilters.length} active`;
+        refs.visibleCount.textContent = `${getVisibleTracks().length} visible`;
+        refs.layerCount.textContent = `Blueprint layers: ${floorBlueprints.length}`;
+        refs.filterSummary.textContent = `Filters: ${state.houseFilters.join(', ')}`;
+        refs.cameraMode.textContent = getSelectedTrack() ? `${getSelectedTrack().name} is locked to ${floorLabels[getSelectedTrack().floor]}` : 'Overview camera feed';
+        refs.profileStatus.textContent = getSelectedTrack() ? getSelectedTrack().status : 'No selection';
+        refs.incidentState.textContent = state.lockdown ? 'Active' : 'Standby';
+        refs.logCount.textContent = `${state.logs.length} entries`;
+        refs.livePill.className = `status-pill ${state.lockdown ? 'tone-lock' : 'tone-online'}`;
+        refs.livePill.textContent = state.lockdown ? 'Campus lockdown' : 'Live tracking';
+        refs.tickLabel.textContent = `Tick ${state.tick}`;
+      }
+
+      function renderHouseFilters() {
+        refs.houseFilters.innerHTML = ['Gryffindor', 'Hufflepuff', 'Ravenclaw', 'Slytherin'].map((house) => `
+          <button class="chip ${state.houseFilters.includes(house) ? 'chip-active' : ''}" data-type="house" data-value="${house}" type="button">${house}</button>
+        `).join('');
+      }
+
+      function renderTierFilters() {
+        refs.tierFilters.innerHTML = ['Student', 'Staff', 'Leadership', 'Security'].map((tier) => `
+          <button class="chip ${state.tierFilters.includes(tier) ? 'chip-active' : ''}" data-type="tier" data-value="${tier}" type="button">${tier}</button>
+        `).join('');
+      }
+
+      function renderDirectory() {
+        const visible = getVisibleTracks();
+        refs.directoryList.innerHTML = visible.map((track) => `
+          <button class="directory-item ${track.id === state.selectedId ? 'directory-item-active' : ''}" data-select="${track.id}" type="button">
+            <div class="directory-item-top">
+              <strong>${track.name}</strong>
+              <span class="status-pill ${metricTone(track.status)}">${track.status}</span>
+            </div>
+            <div class="directory-item-meta">
+              <span>${track.house}</span>
+              <span>${track.tier}</span>
+              <span>${Math.round(track.signal)}%</span>
+            </div>
+            <p>${track.department}</p>
+            <small>${track.floor.toUpperCase()} • ${Math.round(track.x)}, ${Math.round(track.y)}</small>
+          </button>
+        `).join('') || '<div class="muted">No endpoints match the current filters.</div>';
+      }
+
+      function renderProfile() {
+        const track = getSelectedTrack();
+        if (!track) {
+          refs.profilePanel.innerHTML = '<p class="muted">Select an endpoint on the blueprint or in the directory to pin the camera feed.</p>';
+          return;
+        }
+
+        refs.profilePanel.innerHTML = `
+          <div class="profile-head">
+            <div>
+              <p class="profile-name">${track.name}</p>
+              <p class="profile-path">${track.path}</p>
+            </div>
+            <span class="status-pill ${metricTone(track.status)}">${track.house}</span>
+          </div>
+
+          <div class="profile-grid">
+            <div><span class="metric-label">Department</span><strong>${track.department}</strong></div>
+            <div><span class="metric-label">Tier</span><strong>${track.tier}</strong></div>
+            <div><span class="metric-label">Floor</span><strong>${floorLabels[track.floor]}</strong></div>
+            <div><span class="metric-label">Signal</span><strong>${Math.round(track.signal)}%</strong></div>
+            <div><span class="metric-label">Coordinates</span><strong>${Math.round(track.x)}, ${Math.round(track.y)}</strong></div>
+            <div><span class="metric-label">Security mode</span><strong>${state.lockdown ? 'Locked' : 'Open patrol'}</strong></div>
+          </div>
+
+          <div class="camera-feed">
+            <div class="camera-header">
+              <span>Instant camera snap</span>
+              <span class="camera-pip"></span>
+            </div>
+            <div class="camera-body">
+              <div class="scanline"></div>
+              <div class="camera-caption">${track.path}</div>
+              <div class="camera-readout">
+                <span>${track.floor.toUpperCase()}</span>
+                <span>${track.signal.toFixed(1)}% signal strength</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderLogs() {
+        refs.logList.innerHTML = state.logs.map((entry) => `
+          <article class="log-entry">
+            <div class="log-top">
+              <span class="status-pill ${categoryTone(entry.category)}">${entry.category === 'movement' ? 'Movement' : entry.category === 'access' ? 'Access' : entry.category === 'lockdown' ? 'Lockdown' : entry.category === 'reset' ? 'Reset' : 'Alert'}</span>
+              <time>${entry.stamp}</time>
+            </div>
+            <p>${entry.message}</p>
+          </article>
+        `).join('');
+      }
+
+      function renderBlueprint() {
+        const svg = refs.blueprint;
+        const trackLayer = state.tracks.map((track) => `
+          <g class="map-endpoint" data-select="${track.id}">
+            ${track.trail.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="${Math.max(1.4, 5 - point.age)}" class="footprint" opacity="${Math.max(0.12, 1 - point.age * 0.18)}"></circle>`).join('')}
+            <circle cx="${track.x}" cy="${track.y}" r="10" class="node ${metricTone(track.status)}"></circle>
+            <circle cx="${track.x}" cy="${track.y}" r="4" class="node-core"></circle>
+            <text x="${track.x + 14}" y="${track.y - 12}" class="node-label">${track.name}</text>
+            <text x="${track.x + 14}" y="${track.y + 6}" class="node-meta">${Math.round(track.signal)}% · ${track.status}</text>
+          </g>
+        `).join('');
+
+        const floors = floorBlueprints.map((floor) => `
+          <g>
+            <rect x="${floor.x}" y="${floor.y}" width="${floor.width}" height="${floor.height}" rx="28" class="floor-shell" style="stroke:${floor.accent}"></rect>
+            <rect x="${floor.x + 20}" y="${floor.y + 20}" width="${floor.width - 40}" height="${floor.height - 40}" rx="22" class="floor-inner"></rect>
+            <path d="M ${floor.x + 80} ${floor.y + 110} L ${floor.x + floor.width - 80} ${floor.y + 110}" class="corridor"></path>
+            <path d="M ${floor.x + 120} ${floor.y + 220} L ${floor.x + floor.width - 160} ${floor.y + 220}" class="corridor corridor-dashed"></path>
+            <path d="M ${floor.x + 250} ${floor.y + 40} L ${floor.x + 250} ${floor.y + floor.height - 40}" class="corridor corridor-vertical"></path>
+            <text x="${floor.x + 40}" y="${floor.y + 52}" class="floor-label">${floor.name}</text>
+            <text x="${floor.x + 40}" y="${floor.y + floor.height - 28}" class="floor-subtitle">Secret passages and warded channels active.</text>
+          </g>
+        `).join('');
+
+        const passages = `
+          <path d="M 340 1030 C 430 960, 530 965, 620 870 S 820 725, 900 790" class="secret-passage"></path>
+          <path d="M 770 1530 C 880 1460, 960 1450, 1110 1360" class="secret-passage"></path>
+          <path d="M 510 560 C 600 630, 700 650, 820 640 S 1050 615, 1220 690" class="secret-passage"></path>
+        `;
+
+        const focus = trackLayer && getSelectedTrack() ? `
+          <g filter="url(#glow)">
+            <rect x="${getSelectedTrack().x - 16}" y="${getSelectedTrack().y - 16}" width="32" height="32" rx="10" class="focus-ring"></rect>
+          </g>
+        ` : '';
+
+        svg.innerHTML = `
+          <defs>
+            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="4" result="blur"></feGaussianBlur>
+              <feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+            </filter>
+            <linearGradient id="corridor" x1="0" x2="1" y1="0" y2="0">
+              <stop offset="0%" stop-color="rgba(125, 211, 252, 0.08)"></stop>
+              <stop offset="100%" stop-color="rgba(255, 255, 255, 0.28)"></stop>
+            </linearGradient>
+          </defs>
+          ${floors}
+          ${passages}
+          ${trackLayer}
+          ${focus}
+        `;
+      }
+
+      function renderAll() {
+        renderStats();
+        renderFilters();
+        renderDirectory();
+        renderProfile();
+        renderLogs();
+        renderBlueprint();
+      }
+
+      function setLockdown(value) {
+        state.lockdown = value;
+        if (value) {
+          state.logs = [{ id: `log-${Date.now()}`, stamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), category: 'lockdown', message: 'Mischief suppressed. Corridor lockdown engaged across all mapped sectors.' }, ...state.logs].slice(0, 10);
+        }
+        renderAll();
+      }
+
+      function resetSystem() {
+        state.lockdown = false;
+        state.tracks = endpointSeeds.map((seed, index) => ({
+          ...seed,
+          signal: 72 + (index % 5) * 4,
+          status: index % 7 === 0 ? 'Scanning' : 'Online',
+          vx: (index % 2 === 0 ? 1 : -1) * (1.2 + (index % 3) * 0.25),
+          vy: ((index % 3) - 1) * 0.75,
+          trail: [{ x: seed.x - 10, y: seed.y + 4, age: 0 }, { x: seed.x - 24, y: seed.y + 8, age: 1 }],
+        }));
+        state.logs = [{ id: `log-${Date.now()}`, stamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), category: 'reset', message: 'Mischief Managed reset cleared the live tracking state and restored baseline routing.' }, ...initialLogs()];
+        state.selectedId = endpointSeeds[0].id;
+        renderAll();
+      }
+
+      document.getElementById('endpoint-search').addEventListener('input', (event) => {
+        state.search = event.target.value;
+        renderAll();
+      });
+
+      document.getElementById('houseFilters').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-type="house"]');
+        if (!button) return;
+        state.houseFilters = toggleValue(state.houseFilters, button.dataset.value);
+        renderAll();
+      });
+
+      document.getElementById('tierFilters').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-type="tier"]');
+        if (!button) return;
+        state.tierFilters = toggleValue(state.tierFilters, button.dataset.value);
+        renderAll();
+      });
+
+      document.getElementById('directoryList').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-select]');
+        if (!button) return;
+        state.selectedId = button.dataset.select;
+        renderAll();
+      });
+
+      document.getElementById('blueprint').addEventListener('click', (event) => {
+        const endpoint = event.target.closest('[data-select]');
+        if (!endpoint) return;
+        state.selectedId = endpoint.dataset.select;
+        renderAll();
+      });
+
+      document.getElementById('lockdownBtn').addEventListener('click', () => setLockdown(true));
+      document.getElementById('corridorLockBtn').addEventListener('click', () => setLockdown(true));
+      document.getElementById('resetBtn').addEventListener('click', resetSystem);
+      document.getElementById('mischiefBtn').addEventListener('click', resetSystem);
+
+      setInterval(() => {
+        state.tracks = state.tracks.map(advanceTrack);
+        const roster = state.tracks;
+        const selected = roster[Math.floor(Math.random() * roster.length)];
+        const categoryPool = state.lockdown ? ['lockdown', 'alert', 'movement'] : ['movement', 'access', 'alert'];
+        const category = categoryPool[Math.floor(Math.random() * categoryPool.length)];
+        const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const message = category === 'movement'
+          ? `${selected.name} crossed ${selected.path} with signal ${Math.round(selected.signal)}%.`
+          : category === 'access'
+            ? `${selected.name} confirmed permissions for ${selected.department}.`
+            : category === 'lockdown'
+              ? 'Campus lockdown directive propagated across every corridor segment.'
+              : state.lockdown
+                ? `${selected.name} is contained under restricted routing.`
+                : `${selected.name} triggered a transient ward fluctuation.`;
+
+        state.logs = [{ id: `log-${Date.now()}`, stamp, category, message }, ...state.logs].slice(0, 10);
+        state.tick += 1;
+        renderAll();
+      }, 1600);
+
+      renderAll();
+    </script>
+  </body>
+</html>
